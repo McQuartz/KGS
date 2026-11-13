@@ -8,7 +8,7 @@ import { useEffect } from 'react';
 import { View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { getDb } from '../db/db';
+import { initDb } from '../db/db';
 import { useSettings } from '../store/settings';
 import { useTheme } from '../theme';
 
@@ -20,8 +20,7 @@ export default function RootLayout() {
   });
   const loaded = useSettings((s) => s.loaded);
   useEffect(() => {
-    getDb();
-    useSettings.getState().load();
+    initDb().then(() => useSettings.getState().load());
   }, []);
   const t = useTheme();
   if (!fontsLoaded || !loaded) return <View style={{ flex: 1, backgroundColor: t.c.bg }} />;

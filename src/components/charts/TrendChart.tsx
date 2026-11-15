@@ -1,5 +1,5 @@
-import { useId, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View, type LayoutChangeEvent } from 'react-native';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { View, type LayoutChangeEvent } from 'react-native';
 import Svg, { ClipPath, Defs, G, Line, LinearGradient, Path, Rect, Stop, Text as SvgText, Circle } from 'react-native-svg';
 import { GestureDetector, useExclusiveGestures, usePanGesture, usePinchGesture, useSimultaneousGestures, useTapGesture } from 'react-native-gesture-handler';
 import { useTheme, seriesColors, alpha } from '../../theme';
@@ -11,7 +11,7 @@ import type { ChartSeries, TrendChartProps } from './types';
 
 
 const DAY = 86_400_000;
-const MIN_SPAN = 7 * DAY;
+const MIN_SPAN = 5 * DAY;
 
 function niceStep(raw: number): number {
   const p = Math.pow(10, Math.floor(Math.log10(raw)));
@@ -46,14 +46,14 @@ function xTicks(t0: number, t1: number, loc: string): { t: number; l: string }[]
   return out;
 }
 
-interface Pt { t: number; dv: number; sv: number; outlier: boolean }
-interface Bucket { t0: number; t: number; dv: number; sv: number }
+interface Pt { t: number; dv: number; sv: number; outlier: boolean; pr: boolean; label?: string }
+interface Bucket { t0: number; t: number; dv: number; sv: number; lo: number; hi: number }
 interface Prep { id: string; color: string; raw: Pt[]; trend: Pt[]; weeks: Bucket[] }
-interface Cand { si: number; t: number; dv: number; sv: number }
+interface Cand { si: number; t: number; dv: number; sv: number; out: boolean; pr: boolean; label?: string; week?: { t0: number; lo: number; hi: number } }
 interface Range { t0: number; t1: number }
 
 export function TrendChart(props: TrendChartProps) {
-  const { series, type = 'line', height = 180, zoomable = false, formatY, toDisplay, goal, zeroLine, onSelect, compact = false } = props;
+  const { series, type = 'line', height = 180, zoomable = false, formatY, toDisplay, goal, zeroLine, onSelect, compact = false, unit, decimals, onViewChange } = props;
   const th = useTheme();
   const f = useFormat();
   const t = useT();
@@ -69,14 +69,14 @@ export function TrendChart(props: TrendChartProps) {
   const prep: Prep[] = useMemo(
     () =>
       series.map((s: ChartSeries, i: number) => {
-        const mapPts = (a: { t: number; v: number; outlier?: boolean }[] | undefined): Pt[] =>
-          (a ?? []).map((p) => ({ t: p.t, dv: td(p.v), sv: p.v, outlier: !!p.outlier })).sort((x, y) => x.t - y.t);
+        const mapPts = (a: { t: number; v: number; outlier?: boolean; pr?: boolean; label?: string }[] | undefined): Pt[] =>
+          (a ?? []).map((p) => ({ t: p.t, dv: td(p.v), sv: p.v, outlier: !!p.outlier, pr: !!p.pr, label: p.label })).sort((x, y) => x.t - y.t);
         const raw = mapPts(s.raw);
         const trend = mapPts(s.trend);
         let weeks: Bucket[] = [];
-        if (type === 'bars') {
+        if (type === 'bars' || type === 'band') {
           const srcArr = s.raw && s.raw.length ? s.raw.filter((p) => !p.outlier) : s.trend ?? [];
-          weeks = weekly(srcArr.map((p) => ({ t: p.t, v: p.v })), s.agg ?? 'mean').map((w) => ({ t0: w.t0, t: w.t, sv: w.v, dv: td(w.v) }));
+          weeks = weekly(srcArr.map((p) => ({ t: p.t, v: p.v })), s.agg ?? 'mean').map((w) => ({ t0: w.t0, t: w.t, sv: w.v, dv: td(w.v), lo: td(w.lo), hi: td(w.hi) }));
         }
         return { id: s.id, color: s.color ?? colors[i % colors.length], raw, trend, weeks };
       }),
@@ -104,6 +104,11 @@ export function TrendChart(props: TrendChartProps) {
     return { t0: lo, t1: hi };
   }, [prep, props.from, props.to, type]);
 
+  // full extent the user may pan/zoom within (at least the initial window)
+  const bounds: Range | null = domain
+    ? { t0: Math.min(domain.t0, props.boundsFrom ?? domain.t0), t1: Math.max(domain.t1, props.boundsTo ?? domain.t1) }
+    : null;
+
   const clampView = (t0: number, span: number, d: Range): Range => {
     const full = d.t1 - d.t0;
     const sp = Math.max(Math.min(MIN_SPAN, full), Math.min(span, full));
@@ -111,13 +116,20 @@ export function TrendChart(props: TrendChartProps) {
     return { t0: a, t1: a + sp };
   };
 
-  const eff: Range | null = domain ? (view ? clampView(view.t0, view.t1 - view.t0, domain) : domain) : null;
+  const eff: Range | null = domain && bounds ? (view ? clampView(view.t0, view.t1 - view.t0, bounds) : domain) : null;
+  const viewCb = useRef(onViewChange);
+  viewCb.current = onViewChange;
+  useEffect(() => {
+    if (eff) viewCb.current?.({ t0: eff.t0, t1: eff.t1 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eff?.t0, eff?.t1]);
 
   // ---- geometry ----
-  const fs = compact ? 10 : 11;
-  const T = compact ? 8 : 12;
-  const B = compact ? 18 : 24;
-  const R = compact ? 6 : 8;
+  const fs = 11;
+  const T = 10;
+  const B = compact ? 20 : 24;
+  const R = 8;
+  const bandLike = type === 'bars' || type === 'band';
 
   const geo = useMemo(() => {
     if (!eff || W <= 0) return null;
@@ -126,53 +138,60 @@ export function TrendChart(props: TrendChartProps) {
     const allVals: number[] = [];
     const inView = (tm: number) => tm >= t0 && tm <= t1;
     for (const p of prep) {
-      if (type === 'bars') {
-        for (const w of p.weeks) { allVals.push(w.dv); if (w.t0 + 7 * DAY >= t0 && w.t0 <= t1) vals.push(w.dv); }
+      if (bandLike) {
+        for (const w of p.weeks) {
+          const ws = type === 'band' ? [w.lo, w.hi] : [w.dv];
+          allVals.push(...ws);
+          if (w.t0 + 7 * DAY >= t0 && w.t0 <= t1) vals.push(...ws);
+        }
       } else {
         for (const x of p.trend) { allVals.push(x.dv); if (inView(x.t)) vals.push(x.dv); }
-        for (const x of p.raw) if (!x.outlier) { allVals.push(x.dv); if (inView(x.t)) vals.push(x.dv); }
+        for (const x of p.raw) { allVals.push(x.dv); if (inView(x.t)) vals.push(x.dv); }
       }
     }
-    const use = vals.length ? vals : allVals;
+    const hasVis = vals.length > 0;
+    const use = hasVis ? vals : allVals;
     const extra: number[] = [];
     if (goal !== null && goal !== undefined) extra.push(td(goal));
-    if (zeroLine || type === 'bars') extra.push(0);
+    const sumAgg = bandLike && series.some((s) => s.agg === 'sum');
+    if (zeroLine || sumAgg) extra.push(0);
     const arr = [...use, ...extra];
     if (!arr.length) return null;
     let lo = Math.min(...arr);
     let hi = Math.max(...arr);
     const pad = (hi - lo) * 0.14 || Math.max(1, Math.abs(hi) * 0.02);
-    const zeroBase = type === 'bars' && lo >= 0;
-    lo = zeroBase ? 0 : lo - pad;
+    lo = sumAgg ? 0 : lo - pad;
     hi += pad;
     const ph = height - T - B;
     const st = niceStep((hi - lo) / (compact ? 2.2 : 3.2));
-    const fy = formatY ?? ((v: number) => f.num(v, st < 1 ? 1 : 0));
+    const fy = formatY ?? ((v: number) => (Math.abs(v) >= 1000 ? `${f.num(v / 1000, st < 1000 ? 1 : 0)}k` : f.num(v, st < 1 ? 1 : 0)));
     const yt: { v: number; l: string }[] = [];
     for (let k = Math.ceil(lo / st - 1e-9); k * st <= hi + 1e-9 && yt.length < 20; k++) yt.push({ v: k * st, l: fy(k * st) });
     const maxLen = yt.reduce((m, x) => Math.max(m, x.l.length), 1);
-    const L = Math.max(compact ? 26 : 30, Math.ceil(maxLen * (fs * 0.62)) + 10);
+    const L = Math.max(compact ? 34 : 40, Math.ceil(maxLen * (fs * 0.62)) + 12);
     const pw = W - L - R;
     const X = (tm: number) => L + ((tm - t0) / (t1 - t0)) * pw;
     const Y = (v: number) => T + (1 - (v - lo) / (hi - lo)) * ph;
-    return { t0, t1, lo, hi, ph, pw, L, X, Y, yt, fy, xt: xTicks(t0, t1, f.locale) };
+    return { t0, t1, lo, hi, ph, pw, L, X, Y, yt, fy, st, hasVis, xt: xTicks(t0, t1, f.locale) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eff?.t0, eff?.t1, prep, W, height, goal, zeroLine, type, formatY, compact, f.locale]);
+  }, [eff?.t0, eff?.t1, prep, W, height, goal, zeroLine, type, formatY, compact, f.locale, series]);
 
   // candidates for selection
   const cands: Cand[] = useMemo(() => {
     const out: Cand[] = [];
     prep.forEach((p, si) => {
-      if (type === 'bars') for (const w of p.weeks) out.push({ si, t: w.t, dv: w.dv, sv: w.sv });
-      else for (const x of p.raw.length ? p.raw : p.trend) out.push({ si, t: x.t, dv: x.dv, sv: x.sv });
+      if (bandLike) for (const w of p.weeks) out.push({ si, t: w.t, dv: w.dv, sv: w.sv, out: false, pr: false, week: { t0: w.t0, lo: w.lo, hi: w.hi } });
+      else for (const x of p.raw.length ? p.raw : p.trend) out.push({ si, t: x.t, dv: x.dv, sv: x.sv, out: x.outlier, pr: x.pr, label: x.label });
     });
     return out;
-  }, [prep, type]);
+  }, [prep, bandLike]);
 
   // latest values for gesture callbacks
   const live = useRef({ eff, domain, geo, cands, view, W });
   live.current = { eff, domain, geo, cands, view, W };
   const baseView = useRef<Range | null>(null);
+  const boundsRef = useRef<Range | null>(bounds);
+  boundsRef.current = bounds;
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
   const seriesIds = prep.map((p) => p.id);
@@ -213,8 +232,9 @@ export function TrendChart(props: TrendChartProps) {
     failOffsetY: [-14, 14],
     onBegin: () => { baseView.current = live.current.eff; },
     onUpdate: (e) => {
-      const { domain: d, geo: g } = live.current;
+      const { geo: g } = live.current;
       const b = baseView.current;
+      const d = boundsRef.current;
       if (!d || !g || !b) return;
       const span = b.t1 - b.t0;
       setView(clampView(b.t0 - (e.translationX / g.pw) * span, span, d));
@@ -225,8 +245,9 @@ export function TrendChart(props: TrendChartProps) {
     enabled: zoomable,
     onBegin: () => { baseView.current = live.current.eff; },
     onUpdate: (e) => {
-      const { domain: d, geo: g } = live.current;
+      const { geo: g } = live.current;
       const b = baseView.current;
+      const d = boundsRef.current;
       if (!d || !g || !b || !(e.scale > 0)) return;
       const span = b.t1 - b.t0;
       const frac = Math.max(0, Math.min(1, (e.focalX - g.L) / g.pw));
@@ -238,7 +259,7 @@ export function TrendChart(props: TrendChartProps) {
   const single = useTapGesture({
     runOnJS: true,
     numberOfTaps: 1,
-    onActivate: (e) => applySel(nearest(e.x, e.y, 44)),
+    onActivate: (e) => applySel(nearest(e.x, null, Infinity)),
   });
   const dbl = useTapGesture({
     runOnJS: true,
@@ -259,11 +280,11 @@ export function TrendChart(props: TrendChartProps) {
     );
   }
 
-  const font = th.num.regular;
-  const hair = StyleSheet.hairlineWidth;
+  const font = th.num.medium;
   const children: React.ReactNode[] = [];
+  const noVis = !!geo && !compact && !geo.hasVis;
 
-  if (geo) {
+  if (geo && !noVis) {
     const { X, Y, L, pw, ph, t0, t1, lo, hi } = geo;
     const plotBottom = T + ph;
     const single1 = prep.length === 1;
@@ -271,13 +292,13 @@ export function TrendChart(props: TrendChartProps) {
     // grid + y labels
     geo.yt.forEach((tk, i) => {
       const y = Math.round(Y(tk.v)) + 0.5;
-      children.push(<Line key={`g${i}`} x1={L} x2={W - R} y1={y} y2={y} stroke={th.c.line} strokeWidth={hair < 1 ? 1 : hair} />);
+      children.push(<Line key={`g${i}`} x1={L} x2={W - R} y1={y} y2={y} stroke={th.c.line} strokeWidth={1} />);
       children.push(<SvgText key={`gl${i}`} x={L - 6} y={y + fs * 0.35} fontSize={fs} fontFamily={font} fill={th.c.muted} textAnchor="end">{tk.l}</SvgText>);
     });
     geo.xt.forEach((tk, i) => {
       const x = X(tk.t);
       if (x < L + 14 || x > W - R - 14) return;
-      children.push(<SvgText key={`xl${i}`} x={x} y={height - (compact ? 5 : 7)} fontSize={fs} fontFamily={font} fill={th.c.muted} textAnchor="middle">{tk.l}</SvgText>);
+      children.push(<SvgText key={`xl${i}`} x={x} y={height - 6} fontSize={fs} fontFamily={font} fill={th.c.muted} textAnchor="middle">{tk.l}</SvgText>);
     });
 
     // clipped plot content
@@ -291,9 +312,9 @@ export function TrendChart(props: TrendChartProps) {
     }
 
     prep.forEach((p, si) => {
-      if (type === 'bars') {
+      if (bandLike) {
         const n = prep.length;
-        const base = Y(Math.max(lo, 0));
+        const sw = type === 'band';
         for (const w of p.weeks) {
           if (w.t0 + 7 * DAY < t0 || w.t0 > t1) continue;
           const x0 = X(w.t0);
@@ -302,12 +323,19 @@ export function TrendChart(props: TrendChartProps) {
           const gw = x1 - x0 - 2 * gap;
           const bw = Math.max(1.5, gw / n - (n > 1 ? 1 : 0));
           const bx = x0 + gap + si * (gw / n);
-          const y = Y(w.dv);
           const partial = w.t0 + 7 * DAY > Date.now();
           const r = Math.min(4, bw / 2);
-          const top = Math.min(y, base - 2);
-          const d = `M${bx},${base} L${bx},${top + r} Q${bx},${top} ${bx + r},${top} L${bx + bw - r},${top} Q${bx + bw},${top} ${bx + bw},${top + r} L${bx + bw},${base} Z`;
-          plot.push(<Path key={`b${si}-${w.t0}`} d={d} fill={alpha(p.color, partial ? 0.35 : 0.75)} />);
+          if (sw) {
+            const y0 = Y(w.hi);
+            const h = Math.max(3, Y(w.lo) - y0);
+            plot.push(<Rect key={`b${si}-${w.t0}`} x={bx} y={y0} width={bw} height={h} rx={r} fill={alpha(p.color, partial ? 0.12 : 0.24)} />);
+            plot.push(<Rect key={`m${si}-${w.t0}`} x={bx} y={Y(w.dv) - 1} width={bw} height={2.2} fill={p.color} />);
+          } else {
+            const y = Y(w.dv);
+            const top = Math.min(y, plotBottom - 2);
+            const d = `M${bx},${plotBottom} L${bx},${top + r} Q${bx},${top} ${bx + r},${top} L${bx + bw - r},${top} Q${bx + bw},${top} ${bx + bw},${top + r} L${bx + bw},${plotBottom} Z`;
+            plot.push(<Path key={`b${si}-${w.t0}`} d={d} fill={alpha(p.color, partial ? 0.3 : 0.7)} />);
+          }
         }
         return;
       }
@@ -320,14 +348,15 @@ export function TrendChart(props: TrendChartProps) {
           const area = `${d} L${X(lineSrc[lineSrc.length - 1].t).toFixed(1)},${plotBottom} L${X(lineSrc[0].t).toFixed(1)},${plotBottom} Z`;
           plot.push(<Path key={`a${si}`} d={area} fill={`url(#grad${uid})`} />);
         }
-        plot.push(<Path key={`l${si}`} d={d} fill="none" stroke={p.color} strokeWidth={type === 'dots' ? 1.4 : 2} strokeLinejoin="round" strokeLinecap="round" opacity={type === 'dots' ? 0.7 : 1} />);
+        plot.push(<Path key={`l${si}`} d={d} fill="none" stroke={p.color} strokeWidth={type === 'dots' ? 1.4 : 2.2} strokeLinejoin="round" strokeLinecap="round" opacity={type === 'dots' ? 0.7 : 1} />);
       }
-      const rr = compact ? 1.8 : rawVis.length > 120 ? 1.8 : type === 'dots' ? 3.2 : 2.4;
+      const rr = rawVis.length > 120 ? 1.8 : compact ? 2 : type === 'dots' ? 3.2 : 2.6;
       rawVis.forEach((x, i) => {
         const cx = X(x.t);
         const cy = Y(x.dv);
-        if (x.outlier) plot.push(<Circle key={`o${si}-${i}`} cx={cx} cy={cy} r={rr + 1.6} fill="none" stroke={th.c.muted} strokeWidth={1.4} />);
-        else plot.push(<Circle key={`r${si}-${i}`} cx={cx} cy={cy} r={rr} fill={type === 'dots' ? p.color : th.c.muted} opacity={type === 'dots' ? 0.9 : 0.5} />);
+        if (x.outlier) plot.push(<Circle key={`o${si}-${i}`} cx={cx} cy={cy} r={rr + 1.6} fill="none" stroke={th.c.warn} strokeWidth={1.5} />);
+        else if (x.pr && !compact) plot.push(<Rect key={`p${si}-${i}`} x={cx - 3.5} y={cy - 3.5} width={7} height={7} fill={p.color} stroke={th.c.bg} strokeWidth={1.5} transform={`rotate(45 ${cx} ${cy})`} />);
+        else plot.push(<Circle key={`r${si}-${i}`} cx={cx} cy={cy} r={rr} fill={type === 'dots' ? p.color : th.c.muted} opacity={type === 'dots' ? 0.9 : 0.6} />);
       });
       if (!p.raw.length && type === 'dots') {
         for (const x of p.trend) if (x.t >= t0 && x.t <= t1) plot.push(<Circle key={`td${si}-${x.t}`} cx={X(x.t)} cy={Y(x.dv)} r={3} fill={p.color} />);
@@ -338,21 +367,29 @@ export function TrendChart(props: TrendChartProps) {
       <G key="plot" clipPath={`url(#clip${uid})`}>{plot}</G>,
     );
 
-    // selection
+    // selection readout (mockup: dark box with date + value)
     if (sel && sel.t >= t0 && sel.t <= t1 && prep[sel.si]) {
       const x = X(sel.t);
       const y = Y(sel.dv);
-      const l1 = f.date(sel.t);
-      const l2 = geo.fy(sel.dv);
-      const bw = Math.max(l1.length * 6.2, l2.length * 7.6) + 18;
-      const bh = 38;
+      const l1 = sel.week
+        ? `${t('history.weekOf')} ${f.date(sel.week.t0)}`
+        : f.date(sel.t) + (sel.out ? ` · ${t('history.legend.outlier')}` : sel.pr ? ` · ${t('exercise.record')}` : '');
+      const u = unit ? ` ${unit}` : '';
+      const dd = decimals ?? (geo.st < 1 ? 1 : 0);
+      const l2 = sel.week
+        ? type === 'band'
+          ? `${f.num(sel.week.lo, dd)} – ${f.num(sel.week.hi, dd)}${u}`
+          : `${series.find((s) => s.id === prep[sel.si].id)?.agg === 'sum' ? 'Σ ' : 'Ø '}${f.num(sel.dv, dd)}${u}`
+        : sel.label ?? `${f.num(sel.dv, dd)}${u}`;
+      const bw = Math.max(l1.length * 6.1, l2.length * 8.2) + 20;
+      const bh = 42;
       const bx = Math.max(L, Math.min(W - R - bw, x - bw / 2));
       const by = y - bh - 12 < T ? y + 12 : y - bh - 12;
       children.push(<Line key="sl" x1={x} x2={x} y1={T} y2={plotBottom} stroke={th.c.muted} strokeWidth={1} strokeDasharray="3 3" />);
-      children.push(<Circle key="sd" cx={x} cy={y} r={5} fill={prep[sel.si].color} stroke={th.c.bg} strokeWidth={2} />);
+      children.push(<Circle key="sd" cx={x} cy={y} r={4.5} fill={th.c.text} />);
       children.push(<Rect key="sb" x={bx} y={by} width={bw} height={bh} rx={6} fill={th.c.text} />);
-      children.push(<SvgText key="s1" x={bx + 9} y={by + 14} fontSize={11} fontFamily={th.font.medium} fill={th.c.bg}>{l1}</SvgText>);
-      children.push(<SvgText key="s2" x={bx + 9} y={by + 31} fontSize={14} fontFamily={th.num.semibold} fill={th.c.bg}>{l2}</SvgText>);
+      children.push(<SvgText key="s1" x={bx + 10} y={by + 16} fontSize={11} fontFamily={th.font.medium} fill={th.c.bg}>{l1}</SvgText>);
+      children.push(<SvgText key="s2" x={bx + 10} y={by + 33} fontSize={14} fontFamily={th.num.semibold} fill={th.c.bg}>{l2}</SvgText>);
     }
     void pw;
   }
@@ -361,18 +398,24 @@ export function TrendChart(props: TrendChartProps) {
     <GestureDetector gesture={composed}>
       <View style={{ height }} onLayout={onLayout}>
         {W > 0 ? (
-          <Svg width={W} height={height}>
-            <Defs>
-              <ClipPath id={`clip${uid}`}>
-                <Rect x={geo ? geo.L : 0} y={0} width={geo ? geo.pw : W} height={height - B + 2} />
-              </ClipPath>
-              <LinearGradient id={`grad${uid}`} x1="0" y1="0" x2="0" y2="1">
-                <Stop offset="0" stopColor={prep[0]?.color ?? th.c.accent} stopOpacity={0.18} />
-                <Stop offset="1" stopColor={prep[0]?.color ?? th.c.accent} stopOpacity={0} />
-              </LinearGradient>
-            </Defs>
-            {children}
-          </Svg>
+          noVis ? (
+            <View style={{ height, alignItems: 'center', justifyContent: 'center' }}>
+              <Txt v="muted">{t('history.noDataRange')}</Txt>
+            </View>
+          ) : (
+            <Svg width={W} height={height}>
+              <Defs>
+                <ClipPath id={`clip${uid}`}>
+                  <Rect x={geo ? geo.L : 0} y={0} width={geo ? geo.pw : W} height={height - B + 2} />
+                </ClipPath>
+                <LinearGradient id={`grad${uid}`} x1="0" y1={T} x2="0" y2={height - B} gradientUnits="userSpaceOnUse">
+                  <Stop offset="0" stopColor={prep[0]?.color ?? th.c.accent} stopOpacity={0.18} />
+                  <Stop offset="1" stopColor={prep[0]?.color ?? th.c.accent} stopOpacity={0} />
+                </LinearGradient>
+              </Defs>
+              {children}
+            </Svg>
+          )
         ) : null}
       </View>
     </GestureDetector>

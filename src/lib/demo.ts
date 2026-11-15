@@ -3,6 +3,7 @@
 import { getDb } from '../db/db';
 import type { ID, WorkoutType } from '../domain/types';
 import { bumpData } from '../store/dataVersion';
+import { useSettings } from '../store/settings';
 import { uid } from './id';
 
 const DAY = 86_400_000;
@@ -57,6 +58,13 @@ export function generateDemoData() {
     const addMeas = (metric: string, ts: number, v: number) =>
       db.runSync('INSERT INTO measurements (id,metric_id,ts,value,note,demo) VALUES (?,?,?,?,NULL,1)', uid(), metric, ts, v);
 
+    // custom "Arm" value like in the mockup (kept when demo data is removed; harmless)
+    const ARM = 'demo_arm';
+    if (!db.getFirstSync('SELECT id FROM metrics WHERE id=?', ARM)) {
+      const sort = (db.getFirstSync<{ m: number }>('SELECT MAX(sort) m FROM metrics')?.m ?? 0) + 1;
+      db.runSync('INSERT INTO metrics (id,name,kind,unit,decimals,builtin,lower_is_better,sort,archived) VALUES (?,?,?,?,?,0,0,?,0)', ARM, 'Arm', 'custom', 'cm', 1, sort);
+    }
+
     // ----- measurements -----
     for (let d = 200; d >= 1; d--) {
       const p = 1 - d / 200;
@@ -69,6 +77,7 @@ export function generateDemoData() {
       if (d % 7 === 3) addMeas('bf', dayT(d), round1(21.6 - 3.1 * p + gauss() * 0.3));
       if (d % 14 === 12) addMeas('waist', dayT(d), round1(91.6 - 4.9 * p + gauss() * 0.35));
       if (d % 28 === 5) addMeas('muscle', dayT(d), round1(36.3 + 0.8 * p + gauss() * 0.12));
+      if (d % 21 === 8) addMeas(ARM, dayT(d), round1(37.1 + 0.7 * p + gauss() * 0.15));
     }
 
     // ----- templates -----
@@ -149,5 +158,7 @@ export function generateDemoData() {
       });
     }
   });
+  const st = useSettings.getState();
+  if (!st.historySeries.some((x) => x.id === 'demo_arm')) st.set({ historySeries: [...st.historySeries, { id: 'demo_arm', visible: true }] });
   bumpData();
 }

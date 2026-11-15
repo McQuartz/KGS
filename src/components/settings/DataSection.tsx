@@ -7,7 +7,7 @@ import { importJSON, readJSONFile, shareCSV, shareJSONBackup, summarize, validat
 import { generateDemoData } from '../../lib/demo';
 import { useSettings } from '../../store/settings';
 import { Button, Sheet, Txt } from '../ui';
-import { Field, Group, RowDivider, SwitchRow } from './parts';
+import { Field, Group, SwitchRow } from './parts';
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -107,9 +107,7 @@ export function DataSection() {
         <Field caption={t('data.import.cap')}>
           <Button kind="secondary" icon="upload" label={t('data.import')} disabled={busy} onPress={pick} />
         </Field>
-        <RowDivider />
         <SwitchRow title={t('data.demo')} caption={t('data.demo.cap')} value={demo} onChange={toggleDemo} />
-        <RowDivider />
         <Button kind="danger" icon="trash" label={t('data.deleteAll')} onPress={deleteAll} />
       </Group>
       <Sheet visible={pending !== null} onClose={() => setPending(null)} title={t('data.import.title')}>

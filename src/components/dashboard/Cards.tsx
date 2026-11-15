@@ -4,12 +4,13 @@ import { useRouter } from 'expo-router';
 import { Card, Divider, StatusPill, Txt } from '../ui';
 import { Pressable } from 'react-native';
 import { TrendChart } from '../charts';
+import { MiniSpark, type SparkPoint } from './MiniSpark';
 import { useTheme } from '../../theme';
 import { useT } from '../../i18n';
 import { useFormat } from '../../lib/format';
 import { useQuery } from '../../lib/useQuery';
 import { consistencySummary, strengthSummary, volumeSummary, weightSummary } from '../../lib/insights';
-import { latestMeasurement, listMeasurements, listMetrics } from '../../db/repo';
+import { listTemplates, listWorkouts, latestMeasurement, listMeasurements, listMetrics } from '../../db/repo';
 import { startOfWeek } from '../../analysis';
 import { useSettings } from '../../store/settings';
 
@@ -19,62 +20,59 @@ function Head({ title, sub, right }: { title: string; sub?: string; right?: stri
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
       <Txt v="label">{title}</Txt>
-      {right ? <Txt v="small">{right}</Txt> : sub ? <Txt v="small">{sub}</Txt> : null}
+      {right ? <Txt v="xs">{right}</Txt> : sub ? <Txt v="xs">{sub}</Txt> : null}
     </View>
   );
 }
 
 // ---------- strength ----------
+function liftTrend(pts: SparkPoint[]): SparkPoint[] {
+  return pts.map((p, i) => {
+    const w = pts.slice(Math.max(0, i - 4), i + 1).map((x) => x.v).sort((x, y) => x - y);
+    const m = w.length % 2 ? w[(w.length - 1) / 2] : (w[w.length / 2 - 1] + w[w.length / 2]) / 2;
+    return { t: p.t, v: m };
+  });
+}
+
 export function StrengthCard() {
-  const t = useTheme();
   const tr = useT();
   const f = useFormat();
   const router = useRouter();
+  const t = useTheme();
   const s = useQuery(() => strengthSummary(), []);
-  const combined = s.index.combined;
-  const top = s.exercises.filter((a) => a.status.kind !== 'unknown').slice(0, 4);
+  const top = s.exercises.filter((a) => a.sessions.length > 0).slice(0, 4);
   const now = Date.now();
+  const from = now - 84 * DAY;
   return (
     <Card>
       <Head title={tr('dash.strength')} sub={tr('dash.strengthSub')} />
-      {combined.length < 2 ? (
-        <Txt v="muted" style={{ marginTop: 8 }}>{tr('dash.strengthEmpty')}</Txt>
-      ) : (
-        <>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
-            <Txt v="numLg">{f.signed(combined[combined.length - 1].v, 1)} %</Txt>
-            <StatusPill kind={s.status.kind} label={tr(`status.${s.status.kind}`)} />
-          </View>
-          <View style={{ marginTop: 6 }}>
-            <TrendChart
-              series={[{ id: 'strength', trend: combined }]}
-              height={130}
-              compact
-              zeroLine
-              from={now - 180 * DAY}
-              to={now}
-              formatY={(v) => `${f.signed(v, 0)} %`}
-            />
-          </View>
-        </>
-      )}
-      {top.length ? <View style={{ marginTop: 8 }}><Divider /></View> : null}
-      {top.map((a, i) => (
-        <View key={a.exercise.id}>
-          <Pressable
-            onPress={() => router.push({ pathname: '/exercise/[id]', params: { id: a.exercise.id } })}
-            style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, opacity: pressed ? 0.7 : 1 })}
-          >
-            <View style={{ flex: 1 }}>
-              <Txt numberOfLines={1}>{f.exerciseName(a.exercise)}</Txt>
-              <Txt v="small">{f.signed(a.status.pct, 1)} %</Txt>
-            </View>
-            <StatusPill kind={a.status.kind} label={tr(`status.${a.status.kind}`)} />
-          </Pressable>
-          {i < top.length - 1 ? <Divider /> : null}
-        </View>
-      ))}
-      <Txt v="small" style={{ marginTop: 6, color: t.c.muted }}>{tr('dash.strengthCap')}</Txt>
+      {top.length === 0 ? <Txt v="muted">{tr('dash.strengthEmpty')}</Txt> : null}
+      <View>
+        {top.map((a, i) => {
+          const last = a.sessions[a.sessions.length - 1];
+          const recent = a.sessions.filter((x) => x.ts >= from && x.topWeight > 0);
+          const best = Math.max(0, ...recent.map((x) => x.topWeight));
+          const pts = recent.map((x) => ({ t: x.ts, v: x.topWeight }));
+          const st = a.status;
+          return (
+            <Pressable
+              key={a.exercise.id}
+              onPress={() => router.push({ pathname: '/exercise/[id]', params: { id: a.exercise.id } })}
+              style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11, borderTopWidth: i ? 1 : 0, borderTopColor: t.c.line, opacity: pressed ? 0.7 : 1 })}
+            >
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Txt numberOfLines={1} style={{ fontFamily: t.font.medium, fontSize: 17 }}>{f.exerciseName(a.exercise)}</Txt>
+                <Txt v="xs" numberOfLines={1} style={{ fontFamily: t.num.regular }}>
+                  {f.bw(last.topWeight)} {f.wUnit} × {last.topReps}{best > last.topWeight ? ` · ${tr('dash.best')} ${f.bw(best)}` : ''}
+                </Txt>
+              </View>
+              <MiniSpark raw={pts} trend={liftTrend(pts)} from={from} to={now + DAY / 2} />
+              <StatusPill kind={st.kind} label={tr(`status.${st.kind}`)} pct={st.kind === 'up' || st.kind === 'down' ? `${f.signed(st.pct, 1)} %` : undefined} />
+            </Pressable>
+          );
+        })}
+      </View>
+      {top.length ? <Txt v="xs">{tr('dash.strengthCap')}</Txt> : null}
     </Card>
   );
 }
@@ -245,6 +243,27 @@ export function ConsistencyCard() {
         <Txt v="small">{first != null ? f.date(first) : ''}</Txt>
         <Txt v="small">{lastW != null ? f.date(lastW) : ''}</Txt>
       </View>
+    </Card>
+  );
+}
+
+// ---------- last workout ----------
+export function LastWorkoutCard() {
+  const tr = useT();
+  const f = useFormat();
+  const t = useTheme();
+  const router = useRouter();
+  const w = useQuery(() => listWorkouts(0, Number.MAX_SAFE_INTEGER, true)[0] ?? null, []);
+  const tpls = useQuery(() => listTemplates(), []);
+  if (!w) return null;
+  const tpl = w.templateId ? tpls.find((x) => x.id === w.templateId) : undefined;
+  const name = tpl?.name ?? tr(`wtype.${w.workoutType}`);
+  const min = w.endedAt ? Math.max(1, Math.round((w.endedAt - w.startedAt) / 60_000)) : 0;
+  return (
+    <Card onPress={() => router.push({ pathname: '/workout/[id]', params: { id: w.id } })}>
+      <Head title={tr('dash.lastWorkout')} sub={f.dateWeekday(w.startedAt)} />
+      <Txt v="title" style={{ fontSize: 19 }}>{name}</Txt>
+      <Txt v="small" color={t.c.muted}>{tr('dash.exercisesMin', { n: w.exercises.length, min })}</Txt>
     </Card>
   );
 }

@@ -1,41 +1,42 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { ScrollView, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { goalForecast, trendRate } from '../../analysis';
 import { RangeSelector, useRange } from '../../components/history';
-import { TrendChart, type ChartPoint, type ChartSeries } from '../../components/charts';
-import { Card, Chip, Divider, ListRow, Screen, SectionLabel, StatusPill, Txt } from '../../components/ui';
+import { ChartLegend } from '../../components/history/ChartLegend';
+import { TrendChart, type ChartPoint, type ChartSeries, type ChartType } from '../../components/charts';
+import { Card, Chip, Icon, Screen, Segmented, StatusPill, Txt } from '../../components/ui';
 import type { Metric } from '../../domain/types';
 import { listMetrics } from '../../db/repo';
 import { useT } from '../../i18n';
 import { useFormat } from '../../lib/format';
-import {
-  allExerciseAnalysis, consistencySummary, metricTrend, strengthSummary, volumeSummary,
-} from '../../lib/insights';
+import { allExerciseAnalysis, metricTrend, strengthSummary, volumeSummary } from '../../lib/insights';
 import { useQuery } from '../../lib/useQuery';
 import { useSettings } from '../../store/settings';
-import { useTheme } from '../../theme';
+import { alpha, useTheme } from '../../theme';
 
 const DAY = 86_400_000;
-const WEEK = 7 * DAY;
 
 interface Pt { t: number; raw: number; trend: number; outlier: boolean }
 interface SeriesInfo { id: string; label: string }
+type Kind = 'weight' | 'strength' | 'volume' | 'metric';
+type ChartMode = 'trend' | 'weekly' | 'spread';
 
+/** mockup .statgrid cell: caption, big number, unit */
 function Stat({ label, value, unit, color }: { label: string; value: string; unit?: string; color?: string }) {
+  const th = useTheme();
   return (
-    <View style={{ width: '31%', gap: 2 }}>
-      <Txt v="small">{label}</Txt>
-      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 3 }}>
-        <Txt v="numLg" color={color} style={{ fontSize: 20 }}>{value}</Txt>
-        {unit ? <Txt v="small">{unit}</Txt> : null}
+    <View style={{ flex: 1 }}>
+      <Txt v="xs">{label}</Txt>
+      <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap' }}>
+        <Txt color={color} style={{ fontFamily: th.num.medium, fontSize: 17, lineHeight: 24, fontVariant: ['tabular-nums'] }}>{value}</Txt>
+        {unit ? <Txt v="unit" style={{ marginLeft: 4 }}>{unit}</Txt> : null}
       </View>
     </View>
   );
 }
 
 function StatGrid({ children }: { children: ReactNode }) {
-  return <View style={{ flexDirection: 'row', flexWrap: 'wrap', rowGap: 14, justifyContent: 'space-between' }}>{children}</View>;
+  return <View style={{ flexDirection: 'row', gap: 12 }}>{children}</View>;
 }
 
 export default function History() {
@@ -44,9 +45,9 @@ export default function History() {
   const f = useFormat();
   const router = useRouter();
   const historySeries = useSettings((s) => s.historySeries);
-  const chartType = useSettings((s) => s.historyChart);
-  const goalWeight = useSettings((s) => s.goalWeight);
+  const savedChart = useSettings((s) => s.historyChart);
   const trendMethod = useSettings((s) => s.trendMethod);
+  const [mode, setMode] = useState<ChartMode>(savedChart === 'bars' ? 'weekly' : 'trend');
 
   const metrics = useQuery(() => listMetrics(), []);
   const exercises = useQuery(() => allExerciseAnalysis(), []);
@@ -64,32 +65,31 @@ export default function History() {
   const [picked, setPicked] = useState<string | null>(null);
   const selId = seriesList.find((s) => s.id === picked)?.id ?? seriesList[0]?.id ?? 'weight';
   const metric: Metric | undefined = metrics.find((m) => m.id === selId);
-  const kind: 'weight' | 'strength' | 'volume' | 'metric' = selId === 'strength' ? 'strength' : selId === 'volume' ? 'volume' : selId === 'weight' ? 'weight' : 'metric';
+  const kind: Kind = selId === 'strength' ? 'strength' : selId === 'volume' ? 'volume' : selId === 'weight' ? 'weight' : 'metric';
 
   const data = useQuery(() => {
     if (kind === 'strength') {
       const s = strengthSummary();
-      const pts: Pt[] = s.index.combined.map((p) => ({ t: p.t, raw: p.v, trend: p.v, outlier: false }));
-      return { pts, strength: s, volume: null };
+      return { pts: s.index.combined.map((p): Pt => ({ t: p.t, raw: p.v, trend: p.v, outlier: false })) };
     }
     if (kind === 'volume') {
       const v = volumeSummary();
-      const pts: Pt[] = v.daily.map((p) => ({ t: p.t, raw: p.v, trend: p.v, outlier: false }));
-      return { pts, strength: null, volume: v };
+      return { pts: v.daily.map((p): Pt => ({ t: p.t, raw: p.v, trend: p.v, outlier: false })) };
     }
-    const pts: Pt[] = metricTrend(selId).map((p) => ({ t: p.t, raw: p.raw, trend: p.trend, outlier: p.outlier }));
-    return { pts, strength: null, volume: null };
+    return { pts: metricTrend(selId).map((p): Pt => ({ t: p.t, raw: p.raw, trend: p.trend, outlier: p.outlier })) };
   }, [selId, kind, trendMethod]);
 
   const pts = data.pts;
   const range = useRange(pts.length ? pts[0].t : null, '3M');
-  const [sel, setSel] = useState<{ t: number; v: number } | null>(null);
+  const [view, setView] = useState<{ key: string; t0: number; t1: number } | null>(null);
+  const chartKey = `${selId}-${mode}-${range.key}-${range.from}-${range.to}`;
 
   // display conversion per series
   const conv = (v: number) => (kind === 'volume' ? f.wToDisplay(v) : kind === 'strength' ? v : metric ? f.metricToDisplay(metric, v) : f.wToDisplay(v));
   const dec = kind === 'volume' ? 0 : kind === 'strength' ? 1 : metric ? metric.decimals : 1;
   const unit = kind === 'volume' ? f.wUnit : kind === 'strength' ? '%' : metric ? f.metricUnit(metric) : f.wUnit;
-  const fmt = (v: number, d = dec) => f.num(conv(v), d);
+  const derived = kind === 'strength' || kind === 'volume';
+  const lowerBetter = kind === 'weight' || (kind === 'metric' && !!metric?.lowerIsBetter);
 
   const chartSeries: ChartSeries[] = useMemo(() => {
     const raw: ChartPoint[] = pts.map((p) => ({ t: p.t, v: p.raw, outlier: p.outlier }));
@@ -97,22 +97,10 @@ export default function History() {
     return [{ id: selId, color: th.c.accent, raw, trend, agg: kind === 'volume' ? 'sum' : 'mean' }];
   }, [pts, selId, kind, th]);
 
-  const inRange = pts.filter((p) => p.t >= range.from && p.t <= range.to);
-  const shown = (() => {
-    if (sel) {
-      const near = pts.reduce<Pt | null>((b, p) => (!b || Math.abs(p.t - sel.t) < Math.abs(b.t - sel.t) ? p : b), null);
-      if (near && Math.abs(near.t - sel.t) < DAY / 2) return { t: near.t, raw: near.raw, trend: near.trend, outlier: near.outlier };
-      return { t: sel.t, raw: sel.v, trend: null as number | null, outlier: false };
-    }
-    const last = inRange[inRange.length - 1];
-    return last ? { t: last.t, raw: last.raw, trend: last.trend as number | null, outlier: last.outlier } : null;
-  })();
+  const chartType: ChartType = mode === 'weekly' ? 'bars' : mode === 'spread' ? 'band' : 'line';
 
-  const formatY = kind === 'volume'
-    ? (v: number) => (v >= 10000 ? `${f.num(v / 1000, 0)}k` : f.num(v, 0))
-    : kind === 'strength' ? (v: number) => `${v > 0 ? '+' : ''}${f.num(v, 0)} %` : (v: number) => f.num(v, dec);
-
-  const onPickSeries = (id: string) => { setPicked(id); setSel(null); };
+  const v = view && view.key === chartKey ? view : { t0: range.from, t1: range.to };
+  const inView = pts.filter((p) => p.t >= v.t0 && p.t <= v.t1);
 
   if (!seriesList.length) {
     return <Screen title={t('tab.history')}><Card><Txt v="muted">{t('common.noData')}</Txt></Card></Screen>;
@@ -120,232 +108,130 @@ export default function History() {
 
   return (
     <Screen title={t('tab.history')}>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }} style={{ flexGrow: 0 }}>
-        {seriesList.map((s) => <Chip key={s.id} label={s.label} on={s.id === selId} onPress={() => onPickSeries(s.id)} />)}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginHorizontal: -16 }} contentContainerStyle={{ gap: 6, paddingHorizontal: 16 }}>
+        {seriesList.map((s) => <Chip key={s.id} label={s.label} on={s.id === selId} onPress={() => { setPicked(s.id); setView(null); }} />)}
       </ScrollView>
 
-      <Card style={{ gap: 12 }}>
+      <Card>
+        <Segmented<ChartMode>
+          value={mode}
+          onChange={setMode}
+          options={[{ value: 'trend', label: t('history.chart.trend') }, { value: 'weekly', label: t('history.chart.weekly') }, { value: 'spread', label: t('history.chart.spread') }]}
+        />
         <RangeSelector range={range} />
         {pts.length ? (
           <>
-            <View style={{ minHeight: 44, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' }}>
-              {shown ? (
-                <>
-                  <View>
-                    <Txt v="small">{f.dateLong(shown.t)}</Txt>
-                    <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
-                      <Txt v="numLg">{fmt(shown.trend ?? shown.raw)}</Txt>
-                      <Txt v="small">{unit}</Txt>
-                    </View>
-                  </View>
-                  {shown.trend != null && kind !== 'strength' && kind !== 'volume' ? (
-                    <Txt v="small">{t('history.rawTrend', { raw: fmt(shown.raw), trend: fmt(shown.trend) })}{shown.outlier ? ` · ${t('history.outlier')}` : ''}</Txt>
-                  ) : shown.trend != null ? <Txt v="small">{t('history.valueOf', { v: fmt(shown.raw) })}</Txt> : null}
-                </>
-              ) : null}
-            </View>
             <TrendChart
-              key={`${selId}-${range.key}-${range.from}-${range.to}`}
+              key={chartKey}
               series={chartSeries}
-              type={kind === 'volume' && chartType === 'line' ? 'line' : chartType}
-              height={260}
+              type={chartType}
+              height={250}
               from={range.from}
               to={range.to}
+              boundsFrom={range.boundsFrom}
+              boundsTo={range.boundsTo}
               zoomable
-              formatY={formatY}
               toDisplay={conv}
-              goal={kind === 'weight' ? goalWeight : null}
-              zeroLine={kind === 'strength'}
-              onSelect={(s) => setSel(s ? { t: s.t, v: s.v } : null)}
+              unit={unit}
+              decimals={dec}
+              zeroLine={false}
+              onViewChange={(nv) => setView({ key: chartKey, ...nv })}
             />
-            <Legend type={chartType} kind={kind} />
-            <Txt v="small">{t('history.gestures')}</Txt>
+            <ChartLegend items={
+              mode === 'weekly' ? [{ shape: 'bar', label: kind === 'volume' ? t('history.legend.weekSum') : t('history.legend.weekAvg') }]
+                : mode === 'spread' ? [{ shape: 'band', label: t('history.legend.spread') }, { shape: 'line', label: 'Ø' }]
+                : [
+                  { shape: 'dot', label: derived ? t('history.legend.trainingDay') : t('history.legend.entry') },
+                  { shape: 'line', label: t('history.legend.trend') },
+                  ...(derived ? [] : [{ shape: 'ring' as const, label: t('history.legend.outlier') }]),
+                ]
+            } />
+            <Txt v="xs">{t('history.gestures')}</Txt>
           </>
-        ) : <Txt v="muted">{t('common.noData')}</Txt>}
+        ) : <Txt v="muted" style={{ paddingVertical: 30, textAlign: 'center' }}>{t('history.noEntries')}</Txt>}
       </Card>
 
       {pts.length ? (
-        <Card style={{ gap: 14 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-            <Txt v="label">{f.date(range.from)} – {f.date(Math.min(range.to, Date.now()))}</Txt>
-            <Txt v="small">{inRange.length} {kind === 'volume' || kind === 'strength' ? t('history.trainingDays') : t('history.entries')}</Txt>
-          </View>
-          {inRange.length ? (
-            kind === 'volume' ? <VolumeStats pts={inRange} from={range.from} to={range.to} volume={data.volume} /> : (
-              <ValueStats kind={kind} pts={inRange} allPts={pts} metric={metric} conv={conv} dec={dec} unit={unit} />
-            )
-          ) : <Txt v="muted">{t('history.noEntriesInRange')}</Txt>}
-          {kind === 'strength' && data.strength ? <StrengthStats data={data.strength} from={range.from} to={range.to} /> : null}
+        <Card>
+          {inView.length ? (
+            <>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                <Txt v="label">{f.date(v.t0)} – {f.date(v.t1)}</Txt>
+                <Txt v="xs">{derived && kind === 'volume' ? t('history.nTrainingDays', { n: inView.length }) : t('history.nEntries', { n: inView.length })}</Txt>
+              </View>
+              {kind === 'volume' ? <VolumeStats pts={inView} t0={v.t0} t1={v.t1} /> : <ValueStats pts={inView} conv={conv} dec={dec} unit={unit} lowerBetter={lowerBetter} />}
+            </>
+          ) : <Txt v="muted" style={{ paddingVertical: 30, textAlign: 'center' }}>{t('history.noEntries')}</Txt>}
         </Card>
       ) : null}
 
-      <SectionLabel>{t('history.exercises')}</SectionLabel>
-      <Card style={{ paddingVertical: 4 }}>
-        {exercises.length ? exercises.map((a, i) => {
-          const last = a.sessions[a.sessions.length - 1];
-          return (
-            <View key={a.exercise.id}>
-              {i ? <Divider /> : null}
-              <ListRow
-                title={f.exerciseName(a.exercise)}
-                subtitle={last ? `${f.date(last.ts)} · ${f.lift(last.topWeight)} × ${last.topReps} ${f.wUnit}` : undefined}
-                right={<StatusPill kind={a.status.kind} label={t(`status.${a.status.kind}`)} />}
-                onPress={() => router.push(`/exercise/${a.exercise.id}`)}
-              />
-            </View>
-          );
-        }) : <View style={{ padding: 12 }}><Txt v="muted">{t('history.noExercises')}</Txt></View>}
+      <Card>
+        <Txt v="label">{t('history.exercises')}</Txt>
+        <View>
+          {exercises.length ? exercises.map((a, i) => (
+            <Pressable
+              key={a.exercise.id}
+              onPress={() => router.push(`/exercise/${a.exercise.id}`)}
+              style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11, borderTopWidth: i ? 1 : 0, borderTopColor: th.c.line, opacity: pressed ? 0.7 : 1 })}
+            >
+              <View style={{ flex: 1 }}><Txt numberOfLines={1} style={{ fontFamily: th.font.medium }}>{f.exerciseName(a.exercise)}</Txt></View>
+              <StatusPill kind={a.status.kind} label={t(`status.${a.status.kind}`)} pct={a.status.kind === 'up' || a.status.kind === 'down' ? `${f.signed(a.status.pct, 1)} %` : undefined} />
+              <Icon name="chev" size={16} color={th.c.muted} />
+            </Pressable>
+          )) : <Txt v="muted">{t('history.noExercises')}</Txt>}
+        </View>
       </Card>
     </Screen>
   );
 }
 
-function Legend({ type, kind }: { type: 'line' | 'dots' | 'bars'; kind: string }) {
-  const th = useTheme();
-  const t = useT();
-  const item = (shape: 'dot' | 'line' | 'ring' | 'bar', label: string) => (
-    <View key={label} style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-      {shape === 'dot' ? <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: th.c.accent, opacity: 0.55 }} />
-        : shape === 'line' ? <View style={{ width: 16, height: 2.5, borderRadius: 2, backgroundColor: th.c.accent }} />
-        : shape === 'bar' ? <View style={{ width: 9, height: 9, borderRadius: 2, backgroundColor: th.c.accent, opacity: 0.7 }} />
-        : <View style={{ width: 8, height: 8, borderRadius: 4, borderWidth: 1.5, borderColor: th.c.muted }} />}
-      <Txt v="small">{label}</Txt>
-    </View>
-  );
-  const derived = kind === 'strength' || kind === 'volume';
-  return (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 14 }}>
-      {type === 'bars'
-        ? [item('bar', kind === 'volume' ? t('history.legend.weekSum') : t('history.legend.weekAvg'))]
-        : [
-          item('dot', derived ? t('history.legend.trainingDay') : t('history.legend.entry')),
-          item('line', t('history.legend.trend')),
-          ...(derived ? [] : [item('ring', t('history.legend.outlier'))]),
-        ]}
-    </View>
-  );
-}
-
-function ValueStats({ kind, pts, allPts, metric, conv, dec, unit }: {
-  kind: 'weight' | 'strength' | 'metric'; pts: Pt[]; allPts: Pt[]; metric: Metric | undefined;
-  conv: (v: number) => number; dec: number; unit: string;
-}) {
+function ValueStats({ pts, conv, dec, unit, lowerBetter }: { pts: Pt[]; conv: (v: number) => number; dec: number; unit: string; lowerBetter: boolean }) {
   const t = useT();
   const f = useFormat();
   const th = useTheme();
-  const goalWeight = useSettings((s) => s.goalWeight);
   const first = pts[0];
   const last = pts[pts.length - 1];
-  const change = conv(last.trend) - conv(first.trend);
-  const spanDays = (last.t - first.t) / DAY;
-  const rate = trendRate(pts.map((p) => ({ t: p.t, v: p.trend })), last.t, Math.max(7, spanDays + 1));
-  const perWeek = rate ? conv(rate.perWeek) - conv(0) : null;
-  const good = (() => {
-    if (Math.abs(change) < 1e-9) return undefined;
-    if (kind === 'strength') return change > 0 ? th.c.good : undefined;
-    if (kind === 'weight') {
-      if (goalWeight == null) return undefined;
-      return (goalWeight < last.trend ? change < 0 : change > 0) ? th.c.good : undefined;
-    }
-    return (metric?.lowerIsBetter ? change < 0 : change > 0) ? th.c.good : undefined;
-  })();
-  const clean = pts.filter((p) => !p.outlier);
-  const vals = (clean.length ? clean : pts).map((p) => conv(p.raw));
-  const outliers = pts.filter((p) => p.outlier).length;
-  const fc = (() => {
-    if (kind !== 'weight' || goalWeight == null) return null;
-    const lastAll = allPts[allPts.length - 1];
-    const now = Date.now();
-    return goalForecast(lastAll.trend, goalWeight, trendRate(allPts.map((p) => ({ t: p.t, v: p.trend })), now), now);
-  })();
-  const goalTxt = fc
-    ? fc.status === 'reached' ? t('history.goal.reached', { goal: `${f.bw(goalWeight as number)} ${f.wUnit}` })
-      : fc.status === 'on_track' && fc.eta != null ? t('history.goal.onTrack', { goal: `${f.bw(goalWeight as number)} ${f.wUnit}`, eta: f.dateLong(fc.eta), weeks: Math.max(1, Math.round(fc.weeks ?? 0)) })
-      : fc.status === 'wrong_direction' ? t('history.goal.wrong', { goal: `${f.bw(goalWeight as number)} ${f.wUnit}` })
-      : fc.status === 'too_slow' ? t('history.goal.slow') : t('history.goal.unknown')
-    : null;
+  const ch = conv(last.trend) - conv(first.trend);
+  const wk = Math.max(1, (last.t - first.t) / DAY / 7);
+  const good = Math.abs(ch) > 1e-9 && (lowerBetter ? ch < 0 : ch > 0);
   return (
     <>
       <StatGrid>
-        <Stat label={t('history.start')} value={f.num(conv(first.trend), dec)} unit={unit} />
-        <Stat label={t('history.end')} value={f.num(conv(last.trend), dec)} unit={unit} />
-        <Stat label={t('history.change')} value={f.signed(change, kind === 'strength' ? 1 : dec)} unit={unit} color={good} />
-        <Stat label={t('history.perWeek')} value={perWeek != null ? f.signed(perWeek, Math.max(dec, 2)) : '–'} unit={perWeek != null ? unit : undefined} />
-        <Stat label={t('history.min')} value={f.num(Math.min(...vals), dec)} unit={unit} />
-        <Stat label={t('history.max')} value={f.num(Math.max(...vals), dec)} unit={unit} />
+        <Stat label={t('history.trend')} value={f.num(conv(last.trend), dec)} unit={unit} />
+        <Stat label={t('history.change')} value={f.signed(ch, 1)} unit={unit} color={good ? th.c.good : undefined} />
+        <Stat label={t('history.perWeek')} value={f.signed(ch / wk, 2)} />
       </StatGrid>
-      {kind !== 'strength' ? <Txt v="small">{t('history.outliersIgnored', { n: outliers })}</Txt> : null}
-      {goalTxt ? <><Divider /><Txt v="label">{t('history.goalForecast')}</Txt><Txt>{goalTxt}</Txt></> : null}
-    </>
-  );
-}
-
-function VolumeStats({ pts, from, to, volume }: { pts: Pt[]; from: number; to: number; volume: ReturnType<typeof volumeSummary> | null }) {
-  const t = useT();
-  const f = useFormat();
-  const cons = useQuery(() => consistencySummary(), []);
-  const end = Math.min(to, Date.now());
-  const weeks = Math.max(1, (end - from) / WEEK);
-  const total = pts.reduce((a, p) => a + p.raw, 0);
-  const days = Math.max(1, pts.length);
-  const kfmt = (kg: number) => `${f.num(f.wToDisplay(kg) / 1000, 1)}k`;
-  const byGroup = new Map<string, number>();
-  for (const w of volume?.byMuscle ?? []) if (w.t0 + WEEK > from && w.t0 <= end) byGroup.set(w.group, (byGroup.get(w.group) ?? 0) + w.sets);
-  const groups = [...byGroup.entries()].sort((a, b) => b[1] - a[1]);
-  return (
-    <>
-      <StatGrid>
-        <Stat label={t('history.total')} value={kfmt(total)} unit={f.wUnit} />
-        <Stat label={t('history.perWeek')} value={kfmt(total / weeks)} unit={f.wUnit} />
-        <Stat label={t('history.perSession')} value={kfmt(total / days)} unit={f.wUnit} />
-      </StatGrid>
-      <Txt v="small">{t('history.volumeNote')}</Txt>
-      <Divider />
-      <Txt v="label">{t('history.setsPerWeek')}</Txt>
-      {groups.length ? groups.map(([g, n]) => (
-        <View key={g} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-          <Txt>{t(`muscle.${g}`)}</Txt>
-          <Txt v="num">{f.num(n / weeks, 1)}</Txt>
-        </View>
-      )) : <Txt v="muted">{t('common.noData')}</Txt>}
-      <Divider />
-      <Txt v="label">{t('history.consistency')}</Txt>
-      <StatGrid>
-        <Stat label={t('history.avgPerWeek')} value={f.num(cons.avgPerWeek, 1)} />
-        <Stat label={t('history.hitRate')} value={f.num(cons.hitRate * 100, 0)} unit="%" />
-        <Stat label={t('history.streak')} value={String(cons.streakWeeks)} unit={t('history.weeksUnit')} />
-      </StatGrid>
-      <Txt v="small">{t('history.consistencyNote')}</Txt>
-    </>
-  );
-}
-
-function StrengthStats({ data, from, to }: { data: ReturnType<typeof strengthSummary>; from: number; to: number }) {
-  const t = useT();
-  const f = useFormat();
-  const th = useTheme();
-  const rows = data.exercises
-    .map((a) => {
-      const arr = (data.index.perExercise[a.exercise.id] ?? []).filter((p) => p.t >= from && p.t <= to);
-      return { a, change: arr.length >= 2 ? arr[arr.length - 1].v - arr[0].v : null };
-    })
-    .filter((r) => data.index.perExercise[r.a.exercise.id]);
-  return (
-    <>
-      <Divider />
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Txt v="label">{t('history.overall')}</Txt>
-        <StatusPill kind={data.status.kind} label={data.status.kind === 'unknown' ? t('status.unknown') : `${t(`status.${data.status.kind}`)} ${f.signed(data.status.pct, 0)} %`} />
+      <View>
+        {pts.slice(-6).reverse().map((p, i) => (
+          <View key={p.t} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11, borderTopWidth: i ? 1 : 0, borderTopColor: th.c.line }}>
+            <View style={{ flex: 1 }}><Txt style={{ fontSize: 13 }}>{f.dateWeekday(p.t)}</Txt></View>
+            {p.outlier ? (
+              <View style={{ height: 24, paddingHorizontal: 9, borderRadius: 12, justifyContent: 'center', backgroundColor: alpha(th.c.warn, 0.16) }}>
+                <Text style={{ fontFamily: th.font.semibold, fontSize: 12, color: th.c.warn }}>{t('history.outlier')}</Text>
+              </View>
+            ) : null}
+            <Txt style={{ fontFamily: th.num.medium, fontSize: 13, fontVariant: ['tabular-nums'] }}>{f.num(conv(p.raw), dec)} {unit}</Txt>
+          </View>
+        ))}
       </View>
-      <Txt v="small">{t('history.strengthNote')}</Txt>
-      {rows.map(({ a, change }) => (
-        <View key={a.exercise.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <View style={{ flex: 1 }}><Txt numberOfLines={1}>{f.exerciseName(a.exercise)}</Txt></View>
-          <Txt v="num" color={change != null && change > 0 ? th.c.good : change != null && change < 0 ? th.c.bad : th.c.muted}>
-            {change != null ? `${f.signed(change, 1)} %` : '–'}
-          </Txt>
-        </View>
-      ))}
+    </>
+  );
+}
+
+function VolumeStats({ pts, t0, t1 }: { pts: Pt[]; t0: number; t1: number }) {
+  const t = useT();
+  const f = useFormat();
+  const tot = pts.reduce((a, p) => a + p.raw, 0);
+  const wks = Math.max(1, (t1 - t0) / DAY / 7);
+  const r = (kg: number) => f.num(Math.round(f.wToDisplay(kg)), 0);
+  return (
+    <>
+      <StatGrid>
+        <Stat label={t('history.total')} value={f.num(Math.round(f.wToDisplay(tot) / 1000), 0)} unit={f.wUnit === 'kg' ? 't' : 't (lb×1000)'} />
+        <Stat label={t('history.perWeek')} value={r(tot / wks)} unit={f.wUnit} />
+        <Stat label={t('history.perSession')} value={r(tot / Math.max(1, pts.length))} unit={f.wUnit} />
+      </StatGrid>
+      <Txt v="xs">{t('history.volumeNote')}</Txt>
     </>
   );
 }

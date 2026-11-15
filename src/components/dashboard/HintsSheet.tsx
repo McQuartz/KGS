@@ -20,8 +20,9 @@ export function HintsSheet({ visible, onClose, hints }: { visible: boolean; onCl
   return (
     <Sheet visible={visible} onClose={onClose} title={tr('dash.hintsTitle')}>
       {hints.length === 0 ? <Txt v="muted">{tr('hints.empty')}</Txt> : null}
-      {hints.map((h) => {
-        const color = h.tone === 'good' ? t.c.good : h.tone === 'warn' ? t.c.warn : t.c.muted;
+      {hints.map((h, i) => {
+        const pr = h.key === 'hint.pr' || h.key === 'hint.streak';
+        const color = pr ? t.c.accent : h.tone === 'warn' ? t.c.warn : t.c.muted;
         return (
           <Pressable
             key={h.id}
@@ -31,11 +32,13 @@ export function HintsSheet({ visible, onClose, hints }: { visible: boolean; onCl
               onClose();
               router.push({ pathname: '/exercise/[id]', params: { id: h.exerciseId } });
             }}
-            style={{ flexDirection: 'row', gap: 12, alignItems: 'flex-start', backgroundColor: t.c.surface, borderRadius: t.r, padding: 14 }}
+            style={{ flexDirection: 'row', gap: 12, alignItems: 'flex-start', paddingVertical: 12, borderTopWidth: i ? 1 : 0, borderTopColor: t.c.line }}
           >
-            <View style={{ marginTop: 2 }}><Icon name={iconFor(h)} size={18} color={color} /></View>
-            <View style={{ flex: 1 }}><Txt>{hintText(h, tr, f, exercises)}</Txt></View>
-            {h.exerciseId ? <Icon name="chev" size={18} color={t.c.muted} /> : null}
+            <View style={{ width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: pr ? t.c.accentSoft : t.c.surface2 }}>
+              <Icon name={iconFor(h)} size={16} color={color} />
+            </View>
+            <View style={{ flex: 1 }}><Txt style={{ fontSize: 14 }}>{hintText(h, tr, f, exercises)}</Txt></View>
+            {h.exerciseId ? <Icon name="chev" size={16} color={t.c.muted} /> : null}
           </Pressable>
         );
       })}

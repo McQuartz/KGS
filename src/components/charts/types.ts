@@ -2,6 +2,10 @@ export interface ChartPoint {
   t: number; // ms timestamp
   v: number;
   outlier?: boolean;
+  /** record: drawn as an accent diamond (line type) */
+  pr?: boolean;
+  /** overrides the value line of the selection readout (e.g. "102.5 × 5") */
+  label?: string;
 }
 
 export interface ChartSeries {
@@ -17,11 +21,11 @@ export interface ChartSeries {
   agg?: 'mean' | 'sum';
 }
 
-export type ChartType = 'line' | 'dots' | 'bars';
+export type ChartType = 'line' | 'dots' | 'bars' | 'band';
 
 export interface TrendChartProps {
   series: ChartSeries[];
-  /** 'line' = trend line + faint raw dots (default), 'dots' = raw dots only + thin trend, 'bars' = weekly bars */
+  /** 'line' = trend line + faint raw dots (default), 'dots' = raw dots only + thin trend, 'bars' = weekly bars, 'band' = weekly min–max band with mean tick */
   type?: ChartType;
   height?: number;
   /** visible x-range; defaults to data extent */
@@ -39,6 +43,15 @@ export interface TrendChartProps {
   zeroLine?: boolean;
   /** tap/scrub selection callback; null when cleared */
   onSelect?: (sel: { seriesId: string; t: number; v: number } | null) => void;
+  /** bounds for panning/zooming (full data extent); defaults to the visible range */
+  boundsFrom?: number;
+  boundsTo?: number;
+  /** unit appended in the selection readout */
+  unit?: string;
+  /** decimals for the selection readout value */
+  decimals?: number;
+  /** called whenever the visible x-range changes (pan/zoom/reset) */
+  onViewChange?: (v: { t0: number; t1: number }) => void;
   /** compact styling for dashboard cards */
   compact?: boolean;
 }

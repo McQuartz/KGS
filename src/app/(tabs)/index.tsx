@@ -1,14 +1,15 @@
 import type { ReactElement } from 'react';
 import { useState } from 'react';
 import { Screen, IconButton, Txt } from '../../components/ui';
-import { BodyCard, ConsistencyCard, GoalCard, HintsSheet, StrengthCard, VolumeCard, WeightCard } from '../../components/dashboard';
+import { BodyCard, ConsistencyCard, GoalCard, HintsSheet, LastWorkoutCard, StrengthCard, VolumeCard, WeightCard } from '../../components/dashboard';
 import { useT } from '../../i18n';
 import { useFormat } from '../../lib/format';
 import { useQuery } from '../../lib/useQuery';
 import { hints as computeHints } from '../../lib/insights';
-import { useSettings, type DashboardCardId } from '../../store/settings';
+import { useSettings } from '../../store/settings';
 
-const CARDS: Record<DashboardCardId, () => ReactElement> = {
+const CARDS: Record<string, () => ReactElement | null> = {
+  last: LastWorkoutCard,
   weight: WeightCard,
   strength: StrengthCard,
   goal: GoalCard,
@@ -39,8 +40,9 @@ export default function Home() {
 
   return (
     <Screen
+      eyebrow="KGS"
       title={title}
-      right={hintsOn ? <IconButton name="bulb" onPress={openHints} badge={unseen} accessibilityLabel={tr('dash.hints')} color={undefined} /> : undefined}
+      right={hintsOn ? <IconButton name="bulb" size={21} boxed onPress={openHints} count={unseen ? hints.length : undefined} accessibilityLabel={tr('dash.hints')} /> : undefined}
     >
       {visible.map((c) => {
         const Card = CARDS[c.id];

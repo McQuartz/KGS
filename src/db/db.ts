@@ -131,14 +131,9 @@ export function getDb(): SQLite.SQLiteDatabase {
   return db;
 }
 
-/**
- * Opens the DB and runs migrations. On web the SQLite worker boots asynchronously, so we warm it
- * up with an async open first (sync calls before that time out). On native this is immediate.
- */
+/** Opens the DB and runs migrations. On web (dev preview) waits for the sql.js shim first. */
 export async function initDb(): Promise<void> {
-  if (process.env.EXPO_OS === 'web') {
-    const warm = await SQLite.openDatabaseAsync('kgs.db');
-    await warm.closeAsync();
-  }
+  const ready = (SQLite as unknown as { __shimReady?: Promise<void> }).__shimReady;
+  if (ready) await ready;
   getDb();
 }

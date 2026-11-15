@@ -18,16 +18,20 @@ export interface RangeState {
   /** visible window in ms */
   from: number;
   to: number;
+  /** full extent for panning: first data point … end of today */
+  boundsFrom: number;
+  boundsTo: number;
 }
 
 /** Range selection state; `first` is the earliest data timestamp (for "All"). */
 export function useRange(first: number | null, initial: RangeKey = '3M'): RangeState {
   const [key, setKey] = useState<RangeKey>(initial);
   const [custom, setCustom] = useState<{ from: number; to: number } | null>(null);
-  const now = Date.now();
-  const day = Math.floor(now / DAY);
+  const d0 = new Date();
+  d0.setHours(0, 0, 0, 0);
+  const day = d0.getTime();
   return useMemo(() => {
-    const to = day * DAY + DAY * 1.5;
+    const to = day + DAY * 0.75;
     const dataFrom = first != null ? first - 2 * DAY : to - 30 * DAY;
     let from: number;
     let end = to;
@@ -36,7 +40,7 @@ export function useRange(first: number | null, initial: RangeKey = '3M'): RangeS
       from = custom.from;
       end = custom.to;
     } else from = Math.max(dataFrom, to - RANGE_DAYS[key === 'Custom' ? '3M' : key] * DAY);
-    return { key, custom, setKey, setCustom, from, to: end };
+    return { key, custom, setKey, setCustom, from, to: end, boundsFrom: Math.min(dataFrom, from), boundsTo: Math.max(to, end) };
   }, [key, custom, first, day]);
 }
 
@@ -98,7 +102,7 @@ export function RangeSelector({ range }: { range: RangeState }) {
   const initial = range.custom ?? { from: Math.max(range.from, range.to - 60 * DAY), to: Math.min(range.to, Date.now()) };
   return (
     <>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginHorizontal: -16 }} contentContainerStyle={{ gap: 6, paddingHorizontal: 16 }}>
         {KEYS.map((k) => (
           <Chip key={k} label={label(k)} on={range.key === k} onPress={() => { if (k === 'Custom') setOpen(true); else range.setKey(k); }} />
         ))}

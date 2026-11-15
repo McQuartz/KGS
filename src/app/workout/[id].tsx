@@ -57,7 +57,7 @@ export default function WorkoutDetail() {
   return (
     <>
       <Screen
-        title={t(`wtype.${w.workoutType}`)}
+        bar title={t(`wtype.${w.workoutType}`)}
         left={<IconButton name="back" onPress={() => router.back()} accessibilityLabel={t('common.back')} />}
         footer={<Button kind="secondary" icon="trash" label={t('train.deleteWorkout')} onPress={del} />}
       >

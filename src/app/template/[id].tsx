@@ -56,7 +56,7 @@ export default function TemplateEditor() {
   return (
     <>
       <Screen
-        title={isNew ? t('train.newTemplate') : t('train.editTemplate')}
+        bar title={isNew ? t('train.newTemplate') : t('train.editTemplate')}
         left={<IconButton name="back" onPress={() => router.back()} accessibilityLabel={t('common.back')} />}
         footer={(
           <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -67,7 +67,7 @@ export default function TemplateEditor() {
       >
         <TextInput
           value={name} onChangeText={setName} placeholder={t('train.templateName')} placeholderTextColor={th.c.muted}
-          style={{ height: 48, borderRadius: th.rSm, backgroundColor: th.c.surface, paddingHorizontal: 14, color: th.c.text, fontFamily: th.font.medium, fontSize: 16 }}
+          style={{ height: 48, borderRadius: th.rSm, backgroundColor: th.c.surface, borderWidth: 1, borderColor: th.c.line, paddingHorizontal: 14, color: th.c.text, fontFamily: th.font.medium, fontSize: 16 }}
         />
         <SectionLabel>{t('train.workoutType')}</SectionLabel>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>

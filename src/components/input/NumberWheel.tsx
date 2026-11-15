@@ -69,10 +69,12 @@ export interface NumberWheelProps {
   max?: number;
   placeholder?: number | null;
   unit?: string;
+  /** show the big value line above the wheels (default true) */
+  showDisplay?: boolean;
 }
 
 /** Drum wheel(s): integer wheel plus a decimal wheel when decimals > 0. */
-export function NumberWheel({ value, onChange, decimals = 0, step = 1, min, max, placeholder, unit }: NumberWheelProps) {
+export function NumberWheel({ value, onChange, decimals = 0, step = 1, min, max, placeholder, unit, showDisplay = true }: NumberWheelProps) {
   const t = useTheme();
   const f = useFormat();
   const sep = decimalSep(f.locale);
@@ -110,14 +112,14 @@ export function NumberWheel({ value, onChange, decimals = 0, step = 1, min, max,
 
   return (
     <View style={{ gap: 8 }}>
-      <View style={{ alignItems: 'center' }}>
+      {showDisplay ? <View style={{ alignItems: 'center' }}>
         <Text>
           <Text style={{ fontFamily: t.num.semibold, fontSize: 36, color: t.c.text, letterSpacing: -1 }}>{f.num(dispText, decimals)}</Text>
           {unit ? <Text style={{ fontFamily: t.font.regular, fontSize: 16, color: t.c.muted }}>{' ' + unit}</Text> : null}
         </Text>
-      </View>
+      </View> : null}
       <View style={{ height: ITEM_H * ROWS, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }}>
-        <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: ITEM_H * Math.floor(ROWS / 2), height: ITEM_H, backgroundColor: t.c.surface2, borderRadius: t.rSm }} />
+        <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: ITEM_H * Math.floor(ROWS / 2), height: ITEM_H, backgroundColor: t.c.accentSoft, borderRadius: t.rSm }} />
         <Column data={ints} index={ii} width={110} onIndex={(i) => { setIi(i); emit(i, dj); }} />
         {nDec ? (
           <>

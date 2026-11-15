@@ -84,3 +84,18 @@ export function prSetIds(sets: WorkoutSet[], base: { has: boolean; maxWeight: nu
   }
   return out;
 }
+
+/** "102.5 × 5" (no unit; the mockup's set rows) or "30 min · 5 km" for cardio. */
+export function shortSetText(s: Pick<WorkoutSet, 'weight' | 'reps' | 'durationSec' | 'distanceM'>, ex: Exercise | undefined, f: Format, t: TFunc): string {
+  if (isCardio(ex)) return setText(s, ex, f, t);
+  if (s.weight <= 0) return `${s.reps} ${t('train.reps').toLowerCase()}`;
+  return `${f.lift(s.weight)} × ${s.reps}`;
+}
+
+/** Best set of a previous session by weight then reps, formatted "102.5 × 5" plus its date. */
+export function lastTop(sets: WorkoutSet[], ex: Exercise | undefined, f: Format, t: TFunc): string | null {
+  const ws = workingSets(sets);
+  if (!ws.length) return null;
+  const top = isCardio(ex) ? ws[ws.length - 1] : ws.reduce((a, s) => (s.weight > a.weight || (s.weight === a.weight && s.reps > a.reps) ? s : a), ws[0]);
+  return `${shortSetText(top, ex, f, t)} · ${f.ago(top.ts)}`;
+}

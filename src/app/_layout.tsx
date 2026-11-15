@@ -9,6 +9,8 @@ import { View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { initDb } from '../db/db';
+import { kvGet, kvSet, listMeasurements, listWorkouts } from '../db/repo';
+import { generateDemoData } from '../lib/demo';
 import { useSettings } from '../store/settings';
 import { useTheme } from '../theme';
 
@@ -20,7 +22,18 @@ export default function RootLayout() {
   });
   const loaded = useSettings((s) => s.loaded);
   useEffect(() => {
-    initDb().then(() => useSettings.getState().load());
+    initDb().then(() => {
+      useSettings.getState().load();
+      // First run (or nearly empty DB): fill in demo data so every screen has something to show.
+      // Demo rows are tagged and can be removed in Settings → Data.
+      if (!kvGet('demo.autoseeded')) {
+        if (listWorkouts().length < 3 && listMeasurements('weight').length < 7) {
+          generateDemoData();
+          useSettings.getState().set({ demoData: true });
+        }
+        kvSet('demo.autoseeded', '1');
+      }
+    });
   }, []);
   const t = useTheme();
   if (!fontsLoaded || !loaded) return <View style={{ flex: 1, backgroundColor: t.c.bg }} />;

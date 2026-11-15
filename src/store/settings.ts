@@ -7,7 +7,7 @@ export type Lang = 'en' | 'de';
 export type Units = 'metric' | 'imperial';
 export type InputMethod = 'pad' | 'wheel' | 'stepper';
 export type ChartType = 'line' | 'dots' | 'bars';
-export type DashboardCardId = 'weight' | 'strength' | 'body' | 'volume' | 'consistency' | 'goal';
+export type DashboardCardId = 'weight' | 'strength' | 'last' | 'body' | 'volume' | 'consistency' | 'goal';
 export type HistorySeriesId = 'weight' | 'strength' | 'volume' | string; // + metric ids
 
 export interface Settings {
@@ -57,6 +57,7 @@ export const DEFAULT_SETTINGS: Settings = {
   dashboardCards: [
     { id: 'weight', visible: true },
     { id: 'strength', visible: true },
+    { id: 'last', visible: false },
     { id: 'goal', visible: false },
     { id: 'body', visible: false },
     { id: 'volume', visible: false },

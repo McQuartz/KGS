@@ -10,6 +10,7 @@ export const en = {
   'body.deleteTitle': 'Delete entry?',
   'body.deleteMsg': '{value} on {date} will be removed.',
   'body.hold': 'Press and hold an entry to delete it.',
+  'body.inputHint': 'Input method is set globally in Settings. Prefilled with your last value.',
   'body.prevDay': 'Previous day',
   'body.nextDay': 'Next day',
 } as const;
@@ -25,6 +26,7 @@ export const de: Partial<Record<keyof typeof en, string>> = {
   'body.deleteTitle': 'Eintrag löschen?',
   'body.deleteMsg': '{value} am {date} wird entfernt.',
   'body.hold': 'Eintrag gedrückt halten zum Löschen.',
+  'body.inputHint': 'Die Eingabeart wählst du global in den Einstellungen. Vorbelegt mit deinem letzten Wert.',
   'body.prevDay': 'Vorheriger Tag',
   'body.nextDay': 'Nächster Tag',
 };

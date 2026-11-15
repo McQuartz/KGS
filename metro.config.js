@@ -1,12 +1,14 @@
-// Metro config: adds .wasm support and the COOP/COEP headers expo-sqlite needs on web.
+const path = require('path');
 const { getDefaultConfig } = require('expo/metro-config');
 
 const config = getDefaultConfig(__dirname);
-config.resolver.assetExts.push('wasm');
-config.server = config.server || {};
-config.server.enhanceMiddleware = (middleware) => (req, res, next) => {
-  res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
-  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
-  return middleware(req, res, next);
+
+// Web preview only: replace expo-sqlite with an in-memory sql.js shim (see dev/expo-sqlite-web-shim.js).
+const shim = path.resolve(__dirname, 'dev/expo-sqlite-web-shim.js');
+const defaultResolve = config.resolver.resolveRequest;
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (platform === 'web' && moduleName === 'expo-sqlite') return { type: 'sourceFile', filePath: shim };
+  return (defaultResolve ?? context.resolveRequest)(context, moduleName, platform);
 };
+
 module.exports = config;

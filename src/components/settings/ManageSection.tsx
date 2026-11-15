@@ -8,7 +8,7 @@ import { useFormat } from '../../lib/format';
 import { useQuery } from '../../lib/useQuery';
 import { useTheme } from '../../theme';
 import { Button, Chip, Icon, ListRow, Segmented, Sheet, Txt } from '../ui';
-import { Field, Group, RowDivider, SwitchRow } from './parts';
+import { Field, Group, SwitchRow } from './parts';
 
 function TextField({ value, onChange, placeholder }: { value: string; onChange: (s: string) => void; placeholder?: string }) {
   const t = useTheme();
@@ -23,7 +23,7 @@ function TextField({ value, onChange, placeholder }: { value: string; onChange: 
   );
 }
 
-function MetricSheet({ metric, onClose }: { metric: Metric | 'new' | null; onClose: () => void }) {
+export function MetricSheet({ metric, onClose }: { metric: Metric | 'new' | null; onClose: () => void }) {
   const t = useT();
   const f = useFormat();
   const isNew = metric === 'new';
@@ -124,35 +124,25 @@ export function ManageSection() {
   return (
     <>
       <Group label={t('set.body')}>
-        <View>
-          {metrics.map((m, i) => (
-            <View key={m.id}>
-              {i > 0 ? <RowDivider /> : null}
-              <ListRow
-                title={f.metricName(m)}
-                subtitle={[m.builtin ? null : f.metricUnit(m) || null, m.archived ? t('set.metrics.hiddenTag') : null].filter(Boolean).join(' · ') || undefined}
-                onPress={() => setMetric(m)}
-              />
-            </View>
-          ))}
-          <RowDivider />
-          <Pressable onPress={() => setMetric('new')} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12 }}>
-            <Icon name="plus" size={18} color={c.accent} />
-            <Txt color={c.accent}>{t('set.metrics.add')}</Txt>
-          </Pressable>
+        {metrics.map((m) => (
+          <ListRow
+            key={m.id}
+            title={f.metricName(m)}
+            subtitle={[m.builtin ? null : f.metricUnit(m) || null, m.archived ? t('set.metrics.hiddenTag') : null].filter(Boolean).join(' · ') || undefined}
+            onPress={() => setMetric(m)}
+          />
+        ))}
+        <Pressable onPress={() => setMetric('new')} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12 }}>
+          <Icon name="plus" size={16} color={c.accent} />
+          <Txt color={c.accent} style={{ fontSize: 13, lineHeight: 19 }}>{t('set.metrics.add')}</Txt>
+        </Pressable>
+        <View style={{ paddingVertical: 12, gap: 6 }}>
+          <Txt v="label">{t('set.exercises')}</Txt>
+          {custom.length === 0 ? <Txt v="xs" style={{ lineHeight: 17 }}>{t('set.exercises.empty')}</Txt> : null}
         </View>
-        <RowDivider />
-        <Txt v="label">{t('set.exercises')}</Txt>
-        {custom.length === 0 ? <Txt v="small">{t('set.exercises.empty')}</Txt> : (
-          <View>
-            {custom.map((e, i) => (
-              <View key={e.id}>
-                {i > 0 ? <RowDivider /> : null}
-                <ListRow title={e.name} subtitle={[t(`muscle.${e.muscleGroup}`), e.archived ? t('set.metrics.hiddenTag') : null].filter(Boolean).join(' · ')} onPress={() => setEx(e)} />
-              </View>
-            ))}
-          </View>
-        )}
+        {custom.map((e) => (
+          <ListRow key={e.id} title={e.name} subtitle={[t(`muscle.${e.muscleGroup}`), e.archived ? t('set.metrics.hiddenTag') : null].filter(Boolean).join(' · ')} onPress={() => setEx(e)} />
+        ))}
       </Group>
       <MetricSheet metric={metric} onClose={() => setMetric(null)} />
       <ExerciseSheet exercise={ex} onClose={() => setEx(null)} />

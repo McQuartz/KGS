@@ -104,7 +104,7 @@ export function NumberField(props: NumberFieldProps) {
 
   return (
     <View style={{ gap: 4 }}>
-      {label ? <Text style={{ fontFamily: t.font.semibold, fontSize: 12, color: t.c.muted, letterSpacing: 0.4, textTransform: 'uppercase' }}>{label}</Text> : null}
+      {label ? <Text style={{ fontFamily: t.font.medium, fontSize: 13, color: t.c.muted }}>{label}</Text> : null}
       {method === 'stepper' ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <StepButton label={`−${f.numSmart(step * 10, 2)}`} onStep={() => nudge(-step * 10)} />
